@@ -14,7 +14,6 @@ import Queue
 import collections
 
 logger = logging.getLogger(__name__)
-np.random.seed(1234)
 
 class SSFetcher(threading.Thread):
     def __init__(self, parent):
@@ -24,7 +23,7 @@ class SSFetcher(threading.Thread):
 
     def run(self):
         diter = self.parent
-        np.random.shuffle(self.indexes)
+        self.parent.rng.shuffle(self.indexes)
         
         offset = 0 
         # Take groups of 10000 sentences and group by length
@@ -42,7 +41,7 @@ class SSFetcher(threading.Thread):
                     else:
                         # Infinite loop here, we reshuffle the indexes
                         # and reset the offset 
-                        np.random.shuffle(self.indexes)
+                        self.parent.rng.shuffle(self.indexes)
                         offset = 0
                 
                 index = self.indexes[offset]
@@ -69,6 +68,7 @@ class SSFetcher(threading.Thread):
 
 class SSIterator(object):
     def __init__(self,
+                 rng,
                  batch_size,
                  session_file=None,
                  rank_file=None,

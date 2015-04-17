@@ -25,7 +25,7 @@ def create_padded_batch(state, x, y=None):
     n = state['bs'] 
     
     X = numpy.zeros((mx, n), dtype='int32')
-    Y = numpy.zeros((mx, n), dtype='float32')
+    Y = numpy.zeros((mx, n), dtype='int32')
     Xmask = numpy.zeros((mx, n), dtype='float32') 
 
     # Fill X and Xmask
@@ -51,16 +51,15 @@ def create_padded_batch(state, x, y=None):
             session_length = eoq_idx[-1] + 2
          
         X[:session_length, idx] = x[0][idx][:session_length]
-        
         if y:
             Y[eoq_idx, idx] = y[0][idx][:len(eoq_idx)]
 
         max_length = max(max_length, session_length)
         # Set the number of predictions == sum(Xmask), for cost purposes
         num_preds += session_length
-        
+         
         # Mark the end of phrase
-        if len(x[0][idx]) < mx:
+        if session_length < mx:
             X[session_length:, idx] = state['eos_sym']
 
         # Initialize Xmask column with ones in all positions that
@@ -70,10 +69,10 @@ def create_padded_batch(state, x, y=None):
     assert num_preds == numpy.sum(Xmask)
     return {'x': X, 'y': Y, 'x_mask': Xmask, 'num_preds': num_preds, 'max_length': max_length}
 
-def get_batch_iterator(state):
+def get_batch_iterator(rng, state):
     class Iterator(SSIterator):
         def __init__(self, *args, **kwargs):
-            SSIterator.__init__(self, *args, **kwargs)
+            SSIterator.__init__(self, rng, *args, **kwargs)
             self.batch_iter = None
     
         def get_homogenous_batch_iter(self):
@@ -97,8 +96,7 @@ def get_batch_iterator(state):
 
                 x = numpy.asarray(list(itertools.chain(*sessions)))
                 lens = numpy.asarray([map(len, x)])
-                order = numpy.argsort(lens.max(axis=0)) if state['sort_k_batches'] > 1 \
-                        else numpy.arange(len(x))
+                order = numpy.argsort(lens.max(axis=0))
                 
                 for k in range(len(data)):
                     indices = order[k * batch_size:(k + 1) * batch_size]
@@ -139,25 +137,3 @@ def get_batch_iterator(state):
         max_len=state['seqlen'])
     
     return train_data, valid_data
-
-if __name__ == '__main__':
-    state = prototype_rfp()
-    train_data, valid_data, test_data =  get_batch_iterator(state)
-    train_data.start()
-
-    cpt = 0
-    while True:
-        print "Done ", cpt
-        batch = train_data.next()
-        if not batch:
-            print "Restart"
-            continue
-        cpt += 1
-        # print batch['max_length']
-        # print batch['x'][:,0]
-        # print batch['x'][:,1]
-        print batch['x'].shape
-        print batch['y'].shape
-        # print batch['y'][:,1]
-        # print batch['y_mask']
-        break
