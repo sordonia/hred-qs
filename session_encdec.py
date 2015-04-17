@@ -237,6 +237,9 @@ class Decoder(EncoderDecoderBase):
         self.Wd_s_0 = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, self.qdim), name='Wd_s_0'))
         self.bd_s_0 = add_to_params(self.params, theano.shared(value=np.zeros((self.qdim,), dtype='float32'), name='bd_s_0'))
 
+        if self.decoder_bias_type == 'all':
+            self.Wd_s_q = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, self.qdim), name='Wd_s_q'))
+        
         if self.query_step_type == "gated":
             self.Wd_in_r = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='Wd_in_r'))
             self.Wd_in_z = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='Wd_in_z'))
@@ -246,9 +249,9 @@ class Decoder(EncoderDecoderBase):
             self.bd_z = add_to_params(self.params, theano.shared(value=np.zeros((self.qdim,), dtype='float32'), name='bd_z'))
         
             if self.decoder_bias_type == 'all':
-                self.Wd_s_q = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, self.qdim), name='Wd_s_q'))
                 self.Wd_s_z = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, self.qdim), name='Wd_s_z'))
                 self.Wd_s_r = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, self.qdim), name='Wd_s_r')) 
+        
 
         ######################   
         # Output layer weights
@@ -713,17 +716,17 @@ class SessionEncoderDecoder(Model):
         if 'decoder_bias_type' in self.state:
             logger.debug("Decoder bias type {}".format(self.decoder_bias_type))
 
-        logger.debug("Build encoder")
+        logger.info("Build encoder")
         self.h, self.hs = self.encoder.build_encoder(training_x, xmask=training_hs_mask)
 
-        logger.debug("Build decoder (NCE)")
+        logger.info("Build decoder (NCE)")
         contrastive_cost, self.hd_nce = self.decoder.build_decoder(self.hs, training_x, y_neg=self.y_neg, y=training_y, xmask=training_hs_mask, mode=Decoder.NCE)
 
-        logger.debug("Build decoder (EVAL)")
+        logger.info("Build decoder (EVAL)")
         target_probs, self.hd, self.decoder_states = self.decoder.build_decoder(self.hs, training_x, xmask=training_hs_mask, \
                                                                                 y=training_y, mode=Decoder.EVALUATION)
          
-        logger.debug("Build rank predictor")
+        logger.info("Build rank predictor")
         self.predicted_ranks = self.decoder.build_rank_layer(self.hs)
 
         # Prediction cost and rank cost
