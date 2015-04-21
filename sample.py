@@ -37,7 +37,7 @@ def parse_args():
             help="Number of samples")
 
     parser.add_argument("--ignore-unk",
-            default=True, action="store_true",
+            default=True, action="store_false",
             help="Ignore unknown words")
 
     parser.add_argument("model_prefix",

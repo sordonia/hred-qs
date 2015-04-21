@@ -23,6 +23,7 @@ class BeamSearch(object):
         state = self.model.state
         self.unk_sym = self.model.unk_sym
         self.eoq_sym = self.model.eoq_sym
+        self.eos_sym = self.model.eos_sym
         self.soq_sym = self.model.soq_sym
         self.qdim = self.model.qdim
         self.sdim = self.model.sdim
@@ -77,11 +78,12 @@ class BeamSearch(object):
                 log_probs[:, self.unk_sym] = -numpy.inf 
             if k <= min_length:
                 log_probs[:, self.eoq_sym] = -numpy.inf
+                log_probs[:, self.eos_sym] = -numpy.inf
 
             next_costs = numpy.array(costs)[:, None] - log_probs
             
             # Pick only on the first line (for the beginning of sampling)
-            # This will avoid duplicate <s> token.
+            # This will avoid duplicate <q> token.
             if k == 0:
                 flat_next_costs = next_costs[:1, :].flatten()
             else:
@@ -94,8 +96,7 @@ class BeamSearch(object):
             best_costs_indices = argpartition(
                     flat_next_costs.flatten(),
                     beam_size)[:beam_size]            
-             
-
+            
             # Decypher flatten indices
             voc_size = log_probs.shape[1]
             trans_indices = best_costs_indices / voc_size
@@ -121,10 +122,10 @@ class BeamSearch(object):
                 # We finished sampling?
                 if beam_gen[i][-1] == self.eoq_sym:
                     if verbose:
-                        logger.debug("Adding sentence {} from beam {}".format(new_beam_gen[i], i))
+                        logger.info("Adding sentence {} from beam {}".format(beam_gen[i], i))
                      
                     new_session = numpy.vstack([context, numpy.array(new_beam_gen[i], dtype='int32')[:, None]])
-                    ranks = self.rank_prediction(new_session, len(new_session))
+                    ranks = self.rank_prediction(new_session)
                      
                     fin_beam_ranks.append(numpy.ravel(ranks)[-1])
                     fin_beam_gen.append(beam_gen[i]) 
@@ -175,7 +176,11 @@ class Sampler(object):
                 sentence_ids = self.model.words_to_indices(sentence.split())
                 joined_context += [self.model.soq_sym] + sentence_ids + [self.model.eoq_sym]
             
+            if verbose:
+                logger.info(str(joined_context))
+
             samples, costs, ranks = self.beam_search.search(joined_context, n_samples, ignore_unk=ignore_unk, verbose=verbose)
+            logger.info(samples)
             # Convert back indices to list of words
             converted_samples = map(lambda sample : self.model.indices_to_words(sample, exclude_start_end=True), samples)
             # Join the list of words

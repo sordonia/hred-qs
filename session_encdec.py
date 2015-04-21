@@ -80,7 +80,7 @@ class Encoder(EncoderDecoderBase):
 
         hr_tm1 = m_t * h_tm1
         h_t = self.query_rec_activation(T.dot(x_t, self.W_in) + T.dot(hr_tm1, self.W_hh) + self.b_hh)
-        return h_t
+        return h_t,
 
     def gated_query_step(self, x_t, m_t, h_tm1):
         if m_t.ndim >= 1:
@@ -102,7 +102,7 @@ class Encoder(EncoderDecoderBase):
 
         hs_tilde = self.session_rec_activation(T.dot(h_t, self.Ws_in) + T.dot(hs_tm1, self.Ws_hh) + self.bs_hh)
         hs_t = (m_t) * hs_tm1 + (1 - m_t) * hs_tilde
-        return hs_t
+        return hs_t,
 
     def gated_session_step(self, h_t, m_t, hs_tm1):
         rs_t = T.nnet.sigmoid(T.dot(h_t, self.Ws_in_r) + T.dot(hs_tm1, self.Ws_hh_r) + self.bs_r)
@@ -188,6 +188,7 @@ class Encoder(EncoderDecoderBase):
         # Make just one step further
         else:
             _res = f_enc(xe, rolled_xmask, h_0)
+        
         # Get the hidden state sequence
         h = _res[0]
 
@@ -252,7 +253,6 @@ class Decoder(EncoderDecoderBase):
                 self.Wd_s_z = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, self.qdim), name='Wd_s_z'))
                 self.Wd_s_r = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, self.qdim), name='Wd_s_r')) 
         
-
         ######################   
         # Output layer weights
         ######################
@@ -613,12 +613,22 @@ class SessionEncoderDecoder(Model):
             self.eval_fn = theano.function(inputs=[self.x_data, self.x_ranks, self.x_max_length, self.x_cost_mask],
                                             outputs=self.softmax_cost, name="eval_fn")
         return self.eval_fn
+   
+    def build_score_function(self):
+        if not hasattr(self, 'score_fn'):
+            self.score_fn = theano.function(
+                inputs=[self.x_data, self.x_max_length],
+                outputs=[self.per_example_cost],
+                name="score_fn")
+        return self.score_fn
 
     def build_rank_prediction_function(self):
         if not hasattr(self, 'rank_fn'):
+            h, hs = self.encoder.build_encoder(self.aug_x_data)
+            ranks = self.decoder.build_rank_layer(hs)
             self.rank_fn = theano.function(
-                inputs=[self.x_data, self.x_max_length],
-                outputs=[self.predicted_ranks],
+                inputs=[self.x_data],
+                outputs=[ranks],
                 name="rank_fn")
         return self.rank_fn
 
@@ -703,11 +713,13 @@ class SessionEncoderDecoder(Model):
         # The training is done with a trick. We append a special </q> at the beginning of the dialog
         # so that we can predict also the first sent in the dialog starting from the dialog beginning token (</q>).
         self.aug_x_data = T.concatenate([T.alloc(np.int32(self.eoq_sym), 1, self.x_data.shape[1]), self.x_data])
+         
         training_x = self.aug_x_data[:self.x_max_length]
         training_y = self.aug_x_data[1:self.x_max_length+1]
+         
         training_ranks = self.x_ranks[:self.x_max_length-1].flatten()
         training_ranks_mask = T.neq(training_ranks, 0).flatten()
-
+        
         # Here we find the end-of-sentence tokens in the minibatch.
         training_hs_mask = T.neq(training_x, self.eoq_sym)
         training_x_cost_mask = self.x_cost_mask[:self.x_max_length].flatten()
@@ -730,8 +742,9 @@ class SessionEncoderDecoder(Model):
         self.predicted_ranks = self.decoder.build_rank_layer(self.hs)
 
         # Prediction cost and rank cost
+        self.per_example_cost = -T.log(target_probs).reshape((self.x_max_length, self.x_data.shape[1]))
         self.rank_cost = T.sum(((self.predicted_ranks[1:].flatten() - training_ranks) ** 2) * (training_ranks_mask)) / T.sum(training_ranks_mask)
-        self.contrastive_cost = T.sum(contrastive_cost.flatten() * training_x_cost_mask) + np.float32(self.lambda_rank) * self.rank_cost 
+        self.contrastive_cost = T.sum(contrastive_cost.flatten() * training_x_cost_mask) + np.float32(self.lambda_rank) * self.rank_cost  
         self.softmax_cost = T.sum(-T.log(target_probs) * training_x_cost_mask) + np.float32(self.lambda_rank) * self.rank_cost 
         
         self.training_cost = self.softmax_cost
