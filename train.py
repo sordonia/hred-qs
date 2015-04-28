@@ -93,8 +93,8 @@ def main(args):
         else:
             raise Exception("Cannot resume, cannot find files!")
 
-    logger.debug("State:\n{}".format(pprint.pformat(state)))
-    logger.debug("Timings:\n{}".format(pprint.pformat(timings)))
+    logger.info("State:\n{}".format(pprint.pformat(state)))
+    logger.info("Timings:\n{}".format(pprint.pformat(timings)))
        
     model = SessionEncoderDecoder(state)
     rng = model.rng 
@@ -219,7 +219,7 @@ def main(args):
                 logger.debug("[VALIDATION END]") 
                  
                 valid_cost /= valid_done 
-                if len(timings["valid"]) == 0 or valid_cost < timings["valid"][-1]:
+                if len(timings["valid"]) == 0 or valid_cost < numpy.min(numpy.array(timings["valid"])):
                     patience = state['patience']
                     # Saving model if decrease in validation cost
                     save(model, timings)
