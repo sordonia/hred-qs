@@ -34,6 +34,7 @@ parser.add_argument("input", type=str, help="Prefix (*.ses, *.rnk) to separated 
 parser.add_argument("--cutoff", type=int, default=-1, help="Vocabulary cutoff (optional)")
 parser.add_argument("--min_freq", type=int, default=1, help="Min frequency cutoff (optional)")
 parser.add_argument("--dict", type=str, default="", help="External dictionary (pkl file)")
+parser.add_argument("--excl-soq", action="store_true")
 parser.add_argument("output", type=str, help="Output file") 
 args = parser.parse_args()
 
@@ -52,7 +53,6 @@ if args.dict != "":
     
     # Check consistency
     assert '<unk>' in vocab
-    assert '<q>' in vocab
     assert '</s>' in vocab
     assert '</q>' in vocab
 else:
@@ -72,7 +72,11 @@ else:
         vocab_count = word_counter.most_common()
 
     # Add special tokens to the vocabulary
-    vocab = {'<unk>': 0, '<q>': 1, '</q>': 2, '</s>': 3}
+    if args.excl_soq:
+        vocab = {'<unk>': 0, '</q>': 1, '</s>': 2}
+    else:
+        vocab = {'<unk>': 0, '<q>': 1, '</q>': 2, '</s>': 3}
+
     for (word, count) in vocab_count:
         if count < args.min_freq:
             break
@@ -110,25 +114,35 @@ for line, (session, rank) in enumerate(itertools.izip(open(args.input + ".ses", 
             freqs[query_lst[-1]] += 1
 
         num_terms += len(query_lst) 
-        
+         
         # Here, we filter out unknown triple text and empty triples
         # i.e. <q> </q> or <q> 0 </q>
         if query_lst != [0] and len(query_lst):
-            session_lst.append([1] + query_lst + [2]) 
+            if args.excl_soq:
+                session_lst.append(query_lst + [1]) 
+            else:
+                session_lst.append([1] + query_lst + [2])
+                freqs[2] += 1
             freqs[1] += 1
-            freqs[2] += 1
             
             rank_lst.append(ranks[i])
 
     if len(session_lst) > 1:
         rank_lst.append(0)
-        session_lst.append([1,3])
-        freqs[1] += 1
-        freqs[3] += 1
+        if args.excl_soq:
+            session_lst.append([2])
+            freqs[2] += 1
+        else:
+            session_lst.append([1, 3])
+            freqs[1]+=1
+            freqs[3]+=1
+        
+        if line == 0:
+            print 'Example = ', session_lst
 
         # Flatten out binarized triple
         # [[a, b, c], [c, d, e]] -> [a, b, c, d, e]
-        assert len(rank_lst) == len(session_lst)        
+        assert len(rank_lst) == len(session_lst) 
         binarized_ranks.append(rank_lst)
         binarized_session = list(itertools.chain(*session_lst))  
         binarized_corpus.append(binarized_session)
@@ -140,5 +154,5 @@ if args.dict == "":
 
 logger.info("Number of unknowns %d" % unknowns)
 logger.info("Number of terms %d" % num_terms)
-logger.info("Mean session length %f" % float(sum(map(len, binarized_corpus))/len(binarized_corpus)))
+logger.info("Mean session length %f" % (float(sum(map(len, binarized_corpus)))/len(binarized_corpus)))
 logger.info("Writing training %d sessions (%d left out)" % (len(binarized_corpus), line + 1 - len(binarized_corpus)))
