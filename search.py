@@ -92,15 +92,15 @@ class BeamSearch(object):
                 indices = [i for i, bg in enumerate(beam_gen) if bg[-1] == self.eoq_sym]
                 next_costs[indices, :] = numpy.inf 
                 flat_next_costs = next_costs.flatten()
-             
-            best_costs_indices = argpartition(
-                    flat_next_costs.flatten(),
-                    beam_size)[:beam_size]            
             
+            best_costs_indices = argpartition(
+                    flat_next_costs,
+                    beam_size)[:beam_size]
+             
             # Decypher flatten indices
             voc_size = log_probs.shape[1]
             trans_indices = best_costs_indices / voc_size
-            word_indices = best_costs_indices % voc_size 
+            word_indices = best_costs_indices % voc_size  
             costs = flat_next_costs[best_costs_indices]
              
             new_beam_gen = [[] for i in range(beam_size)] 
