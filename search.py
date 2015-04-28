@@ -155,7 +155,6 @@ class Sampler(object):
         # Compile beam search
         self.model = model
         self.beam_search = BeamSearch(model)
-        self.beam_search.compile()
 
     def sample(self, contexts, n_samples=1, ignore_unk=False, verbose=False):
         if verbose:
@@ -167,6 +166,8 @@ class Sampler(object):
 
         # Start loop for each sentence
         for context_id, context_sentences in enumerate(contexts):
+            logger.info("Doing {}/{}".format(context_id, len(contexts)))
+            
             if verbose:
                 logger.info("Searching for {}".format(context_sentences))
 
@@ -174,7 +175,9 @@ class Sampler(object):
             joined_context = []
             for sentence in context_sentences:
                 sentence_ids = self.model.words_to_indices(sentence.split())
-                joined_context += [self.model.soq_sym] + sentence_ids + [self.model.eoq_sym]
+                if self.model.soq_sym != -1:
+                    joined_context += [self.model.soq_sym] 
+                joined_context += sentence_ids + [self.model.eoq_sym]
             
             if verbose:
                 logger.info(str(joined_context))
