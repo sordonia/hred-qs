@@ -3,6 +3,7 @@ import adam
 import theano
 import theano.tensor as T
 from collections import OrderedDict
+from theano_extensions import ProbsGrabber
 
 def sharedX(value, name=None, borrow=False, dtype=None):
     if dtype is None:
@@ -176,21 +177,23 @@ def OrthogonalInit(rng, sizeX, sizeY, sparsity=-1, scale=1):
     u,s,v = numpy.linalg.svd(values)
     values = u * scale
     return values.astype(theano.config.floatX)
+"""
 
-def GrabProbs(classProbs, target, gRange=None):
-    if classProbs.ndim > 2:
-        classProbs = classProbs.reshape((classProbs.shape[0] * classProbs.shape[1], classProbs.shape[2]))
+# grabber = ProbsGrabber()
+def GrabProbs(class_probs, target, gRange=None):
+    if class_probs.ndim > 2:
+        class_probs = class_probs.reshape((class_probs.shape[0] * class_probs.shape[1], class_probs.shape[2]))
     else:
-        classProbs = classProbs
-    
+        class_probs = class_probs
     if target.ndim > 1:
         tflat = target.flatten()
     else:
         tflat = target
-
+     
+    # return grabber(class_probs, target).flatten()
     ### Hack for Theano, much faster than [x, y] indexing 
     ### avoids a copy onto the GPU
-    return T.diag(classProbs.T[tflat])
+    return T.diag(class_probs.T[tflat])
 
 def NormalInit(rng, sizeX, sizeY, scale=0.01, sparsity=-1):
     """ 
