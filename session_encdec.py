@@ -50,27 +50,27 @@ class Encoder(EncoderDecoderBase):
         """ sent weights """
         self.W_emb = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.idim, self.rankdim), name='W_emb'))
         self.W_in = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='W_in'))
-        self.W_hh = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, self.qdim, self.qdim), name='W_hh'))
+        self.W_hh = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.qdim, self.qdim)), name='W_hh'))
         self.b_hh = add_to_params(self.params, theano.shared(value=np.zeros((self.qdim,), dtype='float32'), name='b_hh'))
         
         if self.query_step_type == "gated":
             self.W_in_r = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='W_in_r'))
             self.W_in_z = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='W_in_z'))
-            self.W_hh_r = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, self.qdim, self.qdim), name='W_hh_r'))
-            self.W_hh_z = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, self.qdim, self.qdim), name='W_hh_z'))
+            self.W_hh_r = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.qdim, self.qdim)), name='W_hh_r'))
+            self.W_hh_z = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.qdim, self.qdim)), name='W_hh_z'))
             self.b_z = add_to_params(self.params, theano.shared(value=np.zeros((self.qdim,), dtype='float32'), name='b_z'))
             self.b_r = add_to_params(self.params, theano.shared(value=np.zeros((self.qdim,), dtype='float32'), name='b_r'))
 
         """ Context weights """
         self.Ws_in = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.qdim, self.sdim), name='Ws_in'))
-        self.Ws_hh = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, self.sdim, self.sdim), name='Ws_hh'))
+        self.Ws_hh = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.sdim, self.sdim)), name='Ws_hh'))
         self.bs_hh = add_to_params(self.params, theano.shared(value=np.zeros((self.sdim,), dtype='float32'), name='bs_hh')) 
 
         if self.session_step_type == "gated":
             self.Ws_in_r = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.qdim, self.sdim), name='Ws_in_r'))
             self.Ws_in_z = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.qdim, self.sdim), name='Ws_in_z'))
-            self.Ws_hh_r = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, self.sdim, self.sdim), name='Ws_hh_r'))
-            self.Ws_hh_z = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, self.sdim, self.sdim), name='Ws_hh_z'))
+            self.Ws_hh_r = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.sdim, self.sdim)), name='Ws_hh_r'))
+            self.Ws_hh_z = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.sdim, self.sdim)), name='Ws_hh_z'))
             self.bs_z = add_to_params(self.params, theano.shared(value=np.zeros((self.sdim,), dtype='float32'), name='bs_z'))
             self.bs_r = add_to_params(self.params, theano.shared(value=np.zeros((self.sdim,), dtype='float32'), name='bs_r'))
 
@@ -100,8 +100,8 @@ class Encoder(EncoderDecoderBase):
         if m_t.ndim >= 1:
             m_t = m_t.dimshuffle(0, 'x')
 
-        hs_tilde = self.session_rec_activation(T.dot(h_t, self.Ws_in) + T.dot(hs_tm1, self.Ws_hh) + self.bs_hh)
-        hs_t = (m_t) * hs_tm1 + (1 - m_t) * hs_tilde
+        hs_update = self.session_rec_activation(T.dot(h_t, self.Ws_in) + T.dot(hs_tm1, self.Ws_hh) + self.bs_hh)
+        hs_t = (m_t) * hs_tm1 + (1 - m_t) * hs_update
         return hs_t,
 
     def gated_session_step(self, h_t, m_t, hs_tm1):
@@ -153,11 +153,11 @@ class Encoder(EncoderDecoderBase):
 
         # Here we roll the mask so we avoid the need for separate
         # hr and h. The trick is simple: if the original mask is
-        # 0 1 1 0 1 1 1 0 0 0 0 0 -- batch is filled with eoq_sym
+        # 0 1 1 0 1 1 1 0 0 0 0 1 -- batch is filled with eoq_sym
         # the rolled mask will be
-        # 0 0 1 1 0 1 1 1 0 0 0 0 -- roll to the right
+        # 1 0 1 1 0 1 1 1 0 0 0 0 -- roll to the right
         # ^ ^
-        # two resets </s> <s>
+        # two resets </q> <q>
         # the first reset will reset h_init = 0
         # the second will reset </s> and update given x_t = <s>
         if xmask.ndim == 2:
@@ -232,7 +232,7 @@ class Decoder(EncoderDecoderBase):
         self.bd_out = add_to_params(self.params, theano.shared(value=np.zeros((self.idim,), dtype='float32'), name='bd_out'))
         self.Wd_emb = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.idim, self.rankdim), name='Wd_emb'))
 
-        self.Wd_hh = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, self.qdim, self.qdim), name='Wd_hh'))
+        self.Wd_hh = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.qdim, self.qdim)), name='Wd_hh'))
         self.bd_hh = add_to_params(self.params, theano.shared(value=np.zeros((self.qdim,), dtype='float32'), name='bd_hh'))
         self.Wd_in = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='Wd_in')) 
         self.Wd_s_0 = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, self.qdim), name='Wd_s_0'))
@@ -244,8 +244,8 @@ class Decoder(EncoderDecoderBase):
         if self.query_step_type == "gated":
             self.Wd_in_r = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='Wd_in_r'))
             self.Wd_in_z = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='Wd_in_z'))
-            self.Wd_hh_r = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, self.qdim, self.qdim), name='Wd_hh_r'))
-            self.Wd_hh_z = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, self.qdim, self.qdim), name='Wd_hh_z'))
+            self.Wd_hh_r = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.qdim, self.qdim)), name='Wd_hh_r'))
+            self.Wd_hh_z = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.qdim, self.qdim)), name='Wd_hh_z'))
             self.bd_r = add_to_params(self.params, theano.shared(value=np.zeros((self.qdim,), dtype='float32'), name='bd_r'))
             self.bd_z = add_to_params(self.params, theano.shared(value=np.zeros((self.qdim,), dtype='float32'), name='bd_z'))
         
@@ -388,8 +388,6 @@ class Decoder(EncoderDecoderBase):
         else:
             hd = _res
 
-        # if we are using selective bias, we should update our hs
-        # to the step-selective hs
         pre_activ = self.build_output_layer(hs, xd, hd)
 
         # EVALUATION  : Return target_probs + all the predicted ranks
@@ -478,14 +476,12 @@ class Decoder(EncoderDecoderBase):
         if m_t.ndim >= 1:
             m_t = m_t.dimshuffle(0, 'x')
 
-        hd_tm1 = (m_t) * hd_tm1 + (1 - m_t) * T.tanh(T.dot(hs_t, self.Wd_s_0) + self.bd_s_0)
-        # ^ iff x_{t - 1} = </s> (m_t = 0) then x_{t - 1} = 0
-        # and hd_{t - 1} = tanh(W_s_0 hs_t + bd_s_0) else hd_{t - 1} is left unchanged (m_t = 1)
+        hd_tm1 = (m_t) * hd_tm1 + (1 - m_t) * self.query_rec_activation(T.dot(hs_t, self.Wd_s_0) + self.bd_s_0)
+        # hd_{t - 1} = tanh(W_s_0 hs_t + bd_s_0) else hd_{t - 1} is left unchanged (m_t = 1)
 
         # In the 'all' decoder bias type each hidden state of the decoder
         # RNN receives the hs_t vector as bias without modification
         if self.decoder_bias_type == 'all':
-
             rd_t = T.nnet.sigmoid(T.dot(xd_t, self.Wd_in_r) + T.dot(hd_tm1, self.Wd_hh_r) + T.dot(hs_t, self.Wd_s_r) + self.bd_r)
             zd_t = T.nnet.sigmoid(T.dot(xd_t, self.Wd_in_z) + T.dot(hd_tm1, self.Wd_hh_z) + T.dot(hs_t, self.Wd_s_z) + self.bd_z)
             hd_tilde = self.query_rec_activation(T.dot(xd_t, self.Wd_in) \
@@ -511,7 +507,7 @@ class Decoder(EncoderDecoderBase):
             m_t = m_t.dimshuffle(0, 'x')
         
         # We already assume that xd are zeroed out
-        hd_tm1 = (m_t) * hd_tm1 + (1 - m_t) * T.tanh(T.dot(hs_t, self.Wd_s_0) + self.bd_s_0)
+        hd_tm1 = (m_t) * hd_tm1 + (1 - m_t) * self.query_rec_activation(T.dot(hs_t, self.Wd_s_0) + self.bd_s_0)
         # ^ iff x_{t - 1} = </s> (m_t = 0) then x_{t-1} = 0
         # and hd_{t - 1} = 0 else hd_{t - 1} is left unchanged (m_t = 1)
 
@@ -529,7 +525,7 @@ class Decoder(EncoderDecoderBase):
             output = (hd_t,)
         return output
     ####
-
+         
 class SessionEncoderDecoder(Model):
     def indices_to_words(self, seq, exclude_start_end=False):
         """
@@ -636,7 +632,6 @@ class SessionEncoderDecoder(Model):
         if not hasattr(self, 'get_states_fn'):
             # Compile functions
             logger.debug("Get states of the network")
-
             outputs = [self.h, self.hs, self.hd] + [x for x in self.decoder_states]
             self.get_states_fn = theano.function(inputs=[self.x_data, self.x_max_length],
                                             outputs=outputs, name="get_states_fn")
@@ -656,6 +651,14 @@ class SessionEncoderDecoder(Model):
                 outputs=[outputs, hd],
                 name="next_probs_fn")
         return self.next_probs_fn
+
+    def build_first_vector(self):
+        if not hasattr(self, 'first_vec_fn'):
+            h, hs = self.encoder.build_encoder(self.aug_x_data)
+            hd0 = self.decoder.query_rec_activation(T.dot(hs, self.decoder.Wd_s_0) + self.decoder.bd_s_0) 
+            self.first_vec_fn = theano.function(inputs=[self.x_data],
+                outputs=[h, hs, hd0], name="first_vec_fn")
+        return self.first_vec_fn
 
     def build_encoder_function(self):
         if not hasattr(self, 'encoder_fn'):
@@ -688,7 +691,7 @@ class SessionEncoderDecoder(Model):
         self.idx_to_str = dict([(tok_id, tok) for tok, tok_id, freq in raw_dict])
 
         if '</q>' not in self.str_to_idx \
-           or '<q>' not in self.str_to_idx:
+           or '</s>' not in self.str_to_idx:
                 raise Exception("Error, malformed dictionary!")
 
         # Number of words in the dictionary
