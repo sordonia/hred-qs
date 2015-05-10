@@ -88,18 +88,12 @@ def main():
                          n_samples=args.n_samples,
                          ignore_unk=args.ignore_unk,
                          verbose=args.verbose)
-    
-    print context_samples, context_costs, context_ranks
-
+     
     # Write to output file
-    output_handle = open(args.context + ".sugg.txt", "w")
+    output_handle = open(args.context + "_HED_" + model.run_id + ".gen", "w")
     for context_sample in context_samples:
         print >> output_handle, '\t'.join(context_sample)
     output_handle.close()
-    output_handle = open(args.context + ".sugg.rnk", "w")
-    for context_rank in context_ranks:
-        print >> output_handle, '\t'.join(map(str, context_rank))
-    output_handle.close()
-
+    
 if __name__ == "__main__":
     main()

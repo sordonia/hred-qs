@@ -11,11 +11,132 @@ import os
 import numpy
 import codecs
 
+from theano_extensions import KArgmax
 from session_encdec import SessionEncoderDecoder
 from numpy_compat import argpartition
 from state import prototype_state
 
 logger = logging.getLogger(__name__)
+
+class RandomSearch(object):
+    def __init__(self, model):
+        self.model = model
+        state = self.model.state
+        self.unk_sym = self.model.unk_sym
+        self.eos_sym = self.model.eos_sym
+        self.qdim = self.model.qdim
+        self.compiled = False
+        self.sdim = self.model.sdim
+
+    def compile(self):
+        logger.debug("Compiling random search functions")
+        
+        self.next_probs_predictor = self.model.build_next_probs_function()
+        self.compute_encoding = self.model.build_encoder_function()
+        self.compiled = True
+
+    def search(self, context, n_samples=1, ignore_unk=False, \
+               min_length=1, max_length=100, normalize_by_length=True, verbose=False, \
+               one_sentence=True):
+         
+        if not self.compiled:
+            self.compile()
+
+        # Convert to column vector
+        # start_context = numpy.zeros((1, n_samples), dtype='int32') + self.model.eos_sym
+        if len(context) != 0:
+            context = numpy.repeat(numpy.array(context, dtype='int32')[:,None],\
+                               n_samples, axis=1)
+        
+        prev_hd = numpy.zeros((n_samples, self.qdim), dtype='float32')
+        prev_hs = numpy.zeros((n_samples, self.sdim), dtype='float32')
+         
+        # Compute the context encoding and get
+        # the last hierarchical state
+        h, hs = self.compute_encoding(context)
+        prev_hs = hs[-1]
+        
+        fin_gen = []
+        fin_costs = []
+         
+        gen = [[] for i in range(n_samples)] 
+        costs = [0.0 for i in range(n_samples)]
+        
+        for k in range(max_length):
+            if len(fin_gen) >= n_samples:
+                break
+             
+            if verbose:
+                logger.info("Random search at step %d" % k)
+             
+            prev_words = (numpy.array(map(lambda g : g[-1], gen))
+                    if k > 0
+                    else numpy.zeros(n_samples, dtype="int32") + self.eos_sym)
+            
+            # Here we aggregate the context and recompute the hidden state
+            # at both session level and query level.
+            if k > 0:
+                context = numpy.vstack([context, prev_words]).astype('int32')
+            # ... computation here
+            h, hs = self.compute_encoding(context)
+            prev_hs = hs[-1]
+            # ... done
+            
+            outputs, prev_hd = self.next_probs_predictor(prev_hs, prev_words, prev_hd)
+            
+            log_probs = numpy.log(outputs) 
+            next_costs = numpy.array(costs)[:, None] - log_probs
+             
+            assert outputs.shape[1] == self.model.idim
+             
+            # Choice is complaining
+            outputs = outputs.astype("float64") 
+            next_ids = [self.model.rng.choice(self.model.idim, p = x/numpy.sum(x)) \
+                        for x in outputs] 
+             
+            for num, (current_gen, word_id, cost_array) in \
+                    enumerate(zip(gen, next_ids, next_costs)): 
+                
+                current_gen.append( numpy.int32(word_id) )
+                costs[num] = cost_array[word_id]
+            
+            for i in range(len(gen)):
+                # We finished sampling?
+                if gen[i][-1] == self.eos_sym:
+                    if verbose:
+                        logger.debug("Adding sentence {} from beam {}".format(gen[i], i))
+                     
+                    # Add without start and end-of-sentence
+                    fin_gen.append(gen[i]) 
+                    fin_costs.append(costs[i])
+            
+            ## If we want to sample only one sentence
+            ## we remove from the beam that the ending sentences
+            ## artificially.
+            if one_sentence and k > 0:
+                nf_indx = [indx for (indx, bg) in enumerate(gen) if bg[-1] != self.eos_sym]
+                # Copy previous hidden decoder states
+                prev_hd = prev_hd[nf_indx]
+                # Keep only relevant contextes (those not ended)
+                context = context[:, nf_indx]
+                # Keep track of previous generated sentences and costs
+                gen = [gen[indx] for indx in nf_indx] 
+                costs = [costs[indx] for indx in nf_indx]
+
+        # If we have not sampled anything
+        # then force include stuff
+        if len(fin_gen) == 0:
+            fin_gen = gen 
+            fin_costs = costs 
+         
+        # Normalize costs
+        if normalize_by_length:
+            fin_costs = [(fin_costs[num]/len(fin_gen[num])) \
+                         for num in range(n_samples)]
+
+        fin_gen = numpy.array(fin_gen)[numpy.argsort(fin_costs)]
+        fin_costs = numpy.array(sorted(fin_costs))
+        return fin_gen[:n_samples], fin_costs[:n_samples]
 
 class BeamSearch(object):
     def __init__(self, model):
@@ -49,7 +170,7 @@ class BeamSearch(object):
          
         # Compute the context encoding and get
         # the last hierarchical state
-        h, hs = self.compute_encoding(context)
+        h, hr, hs = self.compute_encoding(context)
         prev_hs[:] = hs[-1]
          
         fin_beam_gen = []
@@ -58,7 +179,9 @@ class BeamSearch(object):
 
         beam_gen = [[] for i in range(beam_size)] 
         costs = [0.0 for i in range(beam_size)]
-
+        
+        min_length += self.model.soq_sym != -1 
+        
         for k in range(max_length):
             if len(fin_beam_gen) >= beam_size:
                 break
@@ -76,7 +199,8 @@ class BeamSearch(object):
             # Adjust log probs according to search restrictions
             if ignore_unk:
                 log_probs[:, self.unk_sym] = -numpy.inf 
-            if k <= min_length:
+            
+            if k < min_length:
                 log_probs[:, self.eoq_sym] = -numpy.inf
                 log_probs[:, self.eos_sym] = -numpy.inf
 
@@ -124,7 +248,8 @@ class BeamSearch(object):
                     if verbose:
                         logger.info("Adding sentence {} from beam {}".format(beam_gen[i], i))
                      
-                    new_session = numpy.vstack([context, numpy.array(new_beam_gen[i], dtype='int32')[:, None]])
+                    new_session = numpy.vstack([context, \
+                        numpy.array(new_beam_gen[i], dtype='int32')[:, None]])
                     ranks = self.rank_prediction(new_session)
                      
                     fin_beam_ranks.append(numpy.ravel(ranks)[-1])
@@ -183,7 +308,6 @@ class Sampler(object):
                 logger.info(str(joined_context))
 
             samples, costs, ranks = self.beam_search.search(joined_context, n_samples, ignore_unk=ignore_unk, verbose=verbose)
-            logger.info(samples)
             # Convert back indices to list of words
             converted_samples = map(lambda sample : self.model.indices_to_words(sample, exclude_start_end=True), samples)
             # Join the list of words
