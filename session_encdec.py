@@ -14,19 +14,16 @@ import cPickle
 import logging
 logger = logging.getLogger(__name__)
 
-from theano.sandbox.scan import scan
 from theano.sandbox.rng_mrg import MRG_RandomStreams
 from theano.tensor.nnet.conv3d2d import *
 from collections import OrderedDict
 
 from model import *
 from utils import *
-
 import operator
 
 # Theano speed-up
 theano.config.scan.allow_gc = False
-#
 
 def add_to_params(params, new_param):
     params.append(new_param)
@@ -36,13 +33,10 @@ class EncoderDecoderBase():
     def __init__(self, state, rng, parent):
         self.rng = rng
         self.parent = parent
-        
         self.state = state
         self.__dict__.update(state)
-        
         self.session_rec_activation = eval(self.session_rec_activation)
         self.query_rec_activation = eval(self.query_rec_activation)
-         
         self.params = []
 
 class Encoder(EncoderDecoderBase):
@@ -52,7 +46,7 @@ class Encoder(EncoderDecoderBase):
         self.W_in = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='W_in'))
         self.W_hh = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.qdim, self.qdim)), name='W_hh'))
         self.b_hh = add_to_params(self.params, theano.shared(value=np.zeros((self.qdim,), dtype='float32'), name='b_hh'))
-        
+
         if self.query_step_type == "gated":
             self.W_in_r = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='W_in_r'))
             self.W_in_z = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='W_in_z'))
@@ -64,7 +58,7 @@ class Encoder(EncoderDecoderBase):
         """ Context weights """
         self.Ws_in = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.qdim, self.sdim), name='Ws_in'))
         self.Ws_hh = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.sdim, self.sdim)), name='Ws_hh'))
-        self.bs_hh = add_to_params(self.params, theano.shared(value=np.zeros((self.sdim,), dtype='float32'), name='bs_hh')) 
+        self.bs_hh = add_to_params(self.params, theano.shared(value=np.zeros((self.sdim,), dtype='float32'), name='bs_hh'))
 
         if self.session_step_type == "gated":
             self.Ws_in_r = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.qdim, self.sdim), name='Ws_in_r'))
@@ -86,12 +80,10 @@ class Encoder(EncoderDecoderBase):
     def gated_query_step(self, x_t, m_t, h_tm1, hr_tm1):
         if m_t.ndim >= 1:
             m_t = m_t.dimshuffle(0, 'x')
-        
         r_t = T.nnet.sigmoid(T.dot(x_t, self.W_in_r) + T.dot(hr_tm1, self.W_hh_r) + self.b_r)
         z_t = T.nnet.sigmoid(T.dot(x_t, self.W_in_z) + T.dot(hr_tm1, self.W_hh_z) + self.b_z)
         h_tilde = self.query_rec_activation(T.dot(x_t, self.W_in) + T.dot(r_t * hr_tm1, self.W_hh) + self.b_hh)
         h_t = (np.float32(1.0) - z_t) * hr_tm1 + z_t * h_tilde
-        
         hr_t = m_t * h_t
         # return both reset state and non-reset state
         return h_t, hr_t, r_t, z_t, h_tilde
@@ -101,7 +93,6 @@ class Encoder(EncoderDecoderBase):
             m_t = m_t.dimshuffle(0, 'x')
 
         hs_update = self.session_rec_activation(T.dot(h_t, self.Ws_in) + T.dot(hs_tm1, self.Ws_hh) + self.bs_hh)
-        
         hs_t = (m_t) * hs_tm1 + (1 - m_t) * hs_update
         return hs_t,
 
@@ -172,23 +163,19 @@ class Encoder(EncoderDecoderBase):
 
         # Run through all the sentence (encode everything)
         if not one_step:
-            _res, _ = theano.scan(f_enc,
-                              sequences=[xe, xmask],\
-                              outputs_info=o_enc_info)
+            _res, _ = theano.scan(
+                f_enc, sequences=[xe, xmask], outputs_info=o_enc_info)
         # Make just one step further
         else:
             _res = f_enc(xe, xmask, h_0, hr_0)
-        
         # Get the hidden state sequence
         h = _res[0]
         hr = _res[1]
-
         # All hierarchical sentence
         # The hs sequence is based on the original mask
         if not one_step:
-            _res,  _ = theano.scan(f_hier,\
-                               sequences=[h, xmask],\
-                               outputs_info=o_hier_info)
+            _res,  _ = theano.scan(
+                f_hier, sequences=[h, xmask], outputs_info=o_hier_info)
         # Just one step further
         else:
             _res = f_hier(h, xmask, hs_0)
@@ -197,7 +184,6 @@ class Encoder(EncoderDecoderBase):
             hs = _res[0]
         else:
             hs = _res
-         
         return (h, hr), hs, (_res[2], _res[3])
 
     def __init__(self, state, rng, parent):
@@ -205,10 +191,8 @@ class Encoder(EncoderDecoderBase):
         self.init_params()
 
 class Decoder(EncoderDecoderBase):
-    NCE = 0
-    EVALUATION = 1
-    SAMPLING = 2
-    BEAM_SEARCH = 3
+    EVALUATION = 0
+    BEAM_SEARCH = 1
 
     def __init__(self, state, rng, parent, encoder):
         EncoderDecoderBase.__init__(self, state, rng, parent)
@@ -218,54 +202,45 @@ class Decoder(EncoderDecoderBase):
         self.trng = MRG_RandomStreams(self.seed)
         self.init_params()
 
-    def init_params(self): 
+    def init_params(self):
         """ Decoder weights """
         self.Wd_emb = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.idim, self.rankdim), name='Wd_emb'))
         self.Wd_hh = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.qdim, self.qdim)), name='Wd_hh'))
-        self.Wd_in = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='Wd_in')) 
+        self.Wd_in = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='Wd_in'))
         self.bd_hh = add_to_params(self.params, theano.shared(value=np.zeros((self.qdim,), dtype='float32'), name='bd_hh'))
-        
         self.Wd_s_0 = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, self.qdim), name='Wd_s_0'))
         self.bd_s_0 = add_to_params(self.params, theano.shared(value=np.zeros((self.qdim,), dtype='float32'), name='bd_s_0'))
 
         if self.decoder_bias_type == 'all':
             self.Wd_s_q = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, self.qdim), name='Wd_s_q'))
-         
         if self.query_step_type == "gated":
             self.Wd_in_r = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='Wd_in_r'))
             self.Wd_in_z = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, self.qdim), name='Wd_in_z'))
-            
             self.Wd_hh_r = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.qdim, self.qdim)), name='Wd_hh_r'))
             self.Wd_hh_z = add_to_params(self.params, theano.shared(value=OrthogonalInit(self.rng, (self.qdim, self.qdim)), name='Wd_hh_z'))
             self.bd_r = add_to_params(self.params, theano.shared(value=np.zeros((self.qdim,), dtype='float32'), name='bd_r'))
             self.bd_z = add_to_params(self.params, theano.shared(value=np.zeros((self.qdim,), dtype='float32'), name='bd_z'))
-        
             if self.decoder_bias_type == 'all':
                 self.Wd_s_z = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, self.qdim), name='Wd_s_z'))
-                self.Wd_s_r = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, self.qdim), name='Wd_s_r')) 
-        
-        ######################   
-        # Output layer weights
-        ######################
+                self.Wd_s_r = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, self.qdim), name='Wd_s_r'))
         out_target_dim = self.qdim
         if not self.maxout_out:
             out_target_dim = self.rankdim
 
         self.Wd_out = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.qdim, out_target_dim), name='Wd_out'))
         self.bd_out = add_to_params(self.params, theano.shared(value=np.zeros((self.idim,), dtype='float32'), name='bd_out'))
-         
         # Set up deep output
         if self.deep_out:
             self.Wd_e_out = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.rankdim, out_target_dim), name='Wd_e_out'))
             self.bd_e_out = add_to_params(self.params, theano.shared(value=np.zeros((out_target_dim,), dtype='float32'), name='bd_e_out'))
-             
-            if self.decoder_bias_type != 'first': 
+
+            if self.decoder_bias_type != 'first':
                 self.Wd_s_out = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, out_target_dim), name='Wd_s_out'))
 
         """ Rank """
         if hasattr(self, 'train_rank'):
             self.Wr_out = add_to_params(self.params, theano.shared(value=NormalInit(self.rng, self.sdim, 1), name='Wr_out'))
-            self.br_out = add_to_params(self.params, theano.shared(value=np.zeros((1,), dtype='float32'), name='br_out')) 
+            self.br_out = add_to_params(self.params, theano.shared(value=np.zeros((1,), dtype='float32'), name='br_out'))
 
     def build_rank_layer(self, hs):
         return T.dot(hs, self.Wr_out) + self.br_out
@@ -293,37 +268,16 @@ class Decoder(EncoderDecoderBase):
         return self.build_decoder(hs, x, mode=Decoder.BEAM_SEARCH, prev_hd=prev_hd)
 
     def approx_embedder(self, x):
-        # Here we use the same embeddings learnt in the encoder.. !!!
+        # Here we use the same embeddings learnt in the encoder !!!
         return self.encoder.approx_embedder(x)
 
     def output_softmax(self, pre_activ):
         # returns a (timestep, bs, idim) matrix (huge)
         return SoftMax(T.dot(pre_activ, self.Wd_emb.T) + self.bd_out)
 
-    def output_nce(self, pre_activ, y, y_hat):
-        # returns a (timestep, bs, pos + neg) matrix (very small)
-        target_embedding = self.Wd_emb[y]
-        # ^ target embedding is (timestep x bs, rankdim)
-        noise_embedding = self.Wd_emb[y_hat]
-        # ^ noise embedding is (10, timestep x bs, rankdim)
-
-        # pre_activ is (timestep x bs x rankdim)
-        pos_scores = (target_embedding * pre_activ).sum(2)
-        neg_scores = (noise_embedding * pre_activ).sum(3)
-
-        pos_scores += self.bd_out[y]
-        neg_scores += self.bd_out[y_hat]
-
-        pos_noise = self.parent.t_noise_probs[y] * 10
-        neg_noise = self.parent.t_noise_probs[y_hat] * 10
-
-        pos_scores = - T.log(T.nnet.sigmoid(pos_scores - T.log(pos_noise)))
-        neg_scores = - T.log(1 - T.nnet.sigmoid(neg_scores - T.log(neg_noise))).sum(0)
-        return pos_scores + neg_scores
-
     def build_decoder(self, hs, x, xmask=None, y=None, y_neg=None, mode=EVALUATION, prev_hd=None, step_num=None):
         # Check parameter consistency
-        if mode == Decoder.EVALUATION or mode == Decoder.NCE:
+        if mode == Decoder.EVALUATION:
             assert not prev_hd
             assert y
         else:
@@ -346,11 +300,11 @@ class Decoder(EncoderDecoderBase):
             assert mode != Decoder.EVALUATION
             xd = (xd.dimshuffle((1, 0)) * xmask).dimshuffle((1, 0))
         else:
-            assert mode == Decoder.EVALUATION or mode == Decoder.NCE
+            assert mode == Decoder.EVALUATION
             xd = (xd.dimshuffle((2,0,1)) * xmask).dimshuffle((1,2,0))
 
         # Run the decoder
-        if mode == Decoder.EVALUATION or mode == Decoder.NCE:
+        if mode == Decoder.EVALUATION:
             hd_init = T.alloc(np.float32(0), x.shape[1], self.qdim)
         else:
             hd_init = prev_hd
@@ -365,7 +319,7 @@ class Decoder(EncoderDecoderBase):
         # If the mode of the decoder is EVALUATION
         # then we evaluate by default all the sentence
         # xd - i.e. xd.ndim == 3, xd = (timesteps, batch_size, qdim)
-        if mode == Decoder.EVALUATION or mode == Decoder.NCE:
+        if mode == Decoder.EVALUATION:
             _res, _ = theano.scan(f_dec,
                               sequences=[xd, xmask, hs],\
                               outputs_info=o_dec_info)
@@ -387,91 +341,13 @@ class Decoder(EncoderDecoderBase):
         if mode == Decoder.EVALUATION:
             target_probs = GrabProbs(self.output_softmax(pre_activ), y)
             return target_probs, hd, _res
-        elif mode == Decoder.NCE:
-            return self.output_nce(pre_activ, y, y_neg), hd
         # BEAM_SEARCH : Return output (the softmax layer) + the new hidden states
         elif mode == Decoder.BEAM_SEARCH:
             return self.output_softmax(pre_activ), hd
-        # SAMPLING    : Return a vector of n_sample from the output layer
-        #                 + log probabilities + the new hidden states
-        elif mode == Decoder.SAMPLING:
-            outputs = self.output_softmax(pre_activ)
-            if outputs.ndim == 1:
-                outputs = outputs.dimshuffle('x', 0)
-            sample = self.trng.multinomial(pvals=outputs, dtype='int64').argmax(axis=-1)
-            if outputs.ndim == 1:
-                sample = sample[0]
-            log_prob = -T.log(T.diag(outputs.T[sample]))
-            return sample, log_prob, hd
-
-    def sampling_step(self, *args):
-        args = iter(args)
-
-        # Arguments that correspond to scan's "sequences" parameteter:
-        step_num = next(args)
-        assert step_num.ndim == 0
-
-        # Arguments that correspond to scan's "outputs" parameteter:
-        prev_word = next(args)
-        assert prev_word.ndim == 1
-
-        # skip the previous word log probability
-        log_prob = next(args)
-        assert log_prob.ndim == 1
-
-        prev_h = next(args)
-        assert prev_h.ndim == 2
-
-        prev_hr = next(args)
-        assert prev_hr.ndim == 2
-
-        prev_hs = next(args)
-        assert prev_hs.ndim == 2
-
-        prev_hd = next(args)
-        assert prev_hd.ndim == 2
-
-        # When we sample we shall recompute the encoder for one step...
-        encoder_args = dict(prev_hs=prev_hs, prev_h=prev_h, prev_hr=prev_hr)
-        (h, hr), hs, _ = self.parent.encoder.build_encoder(prev_word, **encoder_args)
-
-        assert h.ndim == 2
-        assert hs.ndim == 2
-
-        # ...and decode one step.
-        sample, log_prob, hd = self.build_decoder(hs, prev_word, prev_hd=prev_hd, step_num=step_num, mode=Decoder.SAMPLING)
-
-        assert sample.ndim == 1
-        assert log_prob.ndim == 1
-        assert hd.ndim == 2
-
-        return [sample, log_prob, h, hr, hs, hd]
-
-    def build_sampler(self, n_samples, n_steps):
-        # For the naive sampler, the states are:
-        # 1) a vector [</q>] * n_samples to seed the sampling
-        # 2) a vector of [ 0. ] * n_samples for the log_probs
-        # 3) prev_h hidden layers
-        # 4) prev_hs hidden layers
-        # 5) prev_hd hidden layers
-        states = [T.alloc(np.int64(self.eoq_sym), n_samples),
-                  T.alloc(np.float32(0.), n_samples),
-                  T.alloc(np.float32(0.), n_samples, self.qdim),
-                  T.alloc(np.float32(0.), n_samples, self.qdim),
-                  T.alloc(np.float32(0.), n_samples, self.sdim),
-                  T.alloc(np.float32(0.), n_samples, self.qdim)]
-        outputs, updates = theano.scan(self.sampling_step,
-                    outputs_info=states,
-                    sequences=[T.arange(n_steps, dtype='int64')], 
-                    n_steps=n_steps,
-                    name="sampler_scan")
-        # Return sample, log_probs and updates (for tnrg multinomial)
-        return (outputs[0], outputs[1]), updates
 
     def gated_step(self, xd_t, m_t, hs_t, hd_tm1):
         if m_t.ndim >= 1:
             m_t = m_t.dimshuffle(0, 'x')
-        
         hd_tm1 = (m_t) * hd_tm1 + (1 - m_t) * self.query_rec_activation(T.dot(hs_t, self.Wd_s_0) + self.bd_s_0)
         # hd_{t - 1} = tanh(W_s_0 hs_t + bd_s_0) else hd_{t - 1} is left unchanged (m_t = 1)
 
@@ -480,47 +356,46 @@ class Decoder(EncoderDecoderBase):
         if self.decoder_bias_type == 'all':
             rd_t = T.nnet.sigmoid(T.dot(xd_t, self.Wd_in_r) + T.dot(hd_tm1, self.Wd_hh_r) + T.dot(hs_t, self.Wd_s_r) + self.bd_r)
             zd_t = T.nnet.sigmoid(T.dot(xd_t, self.Wd_in_z) + T.dot(hd_tm1, self.Wd_hh_z) + T.dot(hs_t, self.Wd_s_z) + self.bd_z)
-            hd_tilde = self.query_rec_activation(T.dot(xd_t, self.Wd_in) \
-                                        + T.dot(rd_t * hd_tm1, self.Wd_hh) \
-                                        + T.dot(hs_t, self.Wd_s_q) \
+            hd_tilde = self.query_rec_activation(T.dot(xd_t, self.Wd_in)
+                                        + T.dot(rd_t * hd_tm1, self.Wd_hh)
+                                        + T.dot(hs_t, self.Wd_s_q)
                                         + self.bd_hh)
-            hd_t = (np.float32(1.) - zd_t) * hd_tm1 + zd_t * hd_tilde 
+            hd_t = (np.float32(1.) - zd_t) * hd_tm1 + zd_t * hd_tilde
             output = (hd_t, rd_t, zd_t, hd_tilde)
         else:
             # Do not bias all the decoder (force to store very useful information in the first state)
             rd_t = T.nnet.sigmoid(T.dot(xd_t, self.Wd_in_r) + T.dot(hd_tm1, self.Wd_hh_r) + self.bd_r)
             zd_t = T.nnet.sigmoid(T.dot(xd_t, self.Wd_in_z) + T.dot(hd_tm1, self.Wd_hh_z) + self.bd_z)
-            hd_tilde = self.query_rec_activation(T.dot(xd_t, self.Wd_in) \
-                                        + T.dot(rd_t * hd_tm1, self.Wd_hh) \
-                                        + self.bd_hh) 
+            hd_tilde = self.query_rec_activation(T.dot(xd_t, self.Wd_in)
+                                        + T.dot(rd_t * hd_tm1, self.Wd_hh)
+                                        + self.bd_hh)
             hd_t = (np.float32(1.) - zd_t) * hd_tm1 + zd_t * hd_tilde
             output = (hd_t, rd_t, zd_t, hd_tilde)
         return output
-    
+
     def plain_step(self, xd_t, m_t, hs_t, hd_tm1):
         if m_t.ndim >= 1:
             m_t = m_t.dimshuffle(0, 'x')
-        
         # We already assume that xd are zeroed out
         hd_tm1 = (m_t) * hd_tm1 + (1 - m_t) * self.query_rec_activation(T.dot(hs_t, self.Wd_s_0) + self.bd_s_0)
         # ^ iff x_{t - 1} = </s> (m_t = 0) then x_{t-1} = 0
         # and hd_{t - 1} = 0 else hd_{t - 1} is left unchanged (m_t = 1)
 
         if self.decoder_bias_type == 'first':
-            # Do not bias all the decoder (force to store very useful information in the first state) 
-            hd_t = self.query_rec_activation( T.dot(xd_t, self.Wd_in) \
-                                             + T.dot(hd_tm1, self.Wd_hh) \
+            # Do not bias all the decoder (force to store very useful information in the first state)
+            hd_t = self.query_rec_activation( T.dot(xd_t, self.Wd_in)
+                                             + T.dot(hd_tm1, self.Wd_hh)
                                              + self.bd_hh )
             output = (hd_t,)
         elif self.decoder_bias_type == 'all':
-            hd_t = self.query_rec_activation( T.dot(xd_t, self.Wd_in) \
-                                             + T.dot(hd_tm1, self.Wd_hh) \
-                                             + T.dot(hs_t, self.Wd_s_q) \
+            hd_t = self.query_rec_activation( T.dot(xd_t, self.Wd_in)
+                                             + T.dot(hd_tm1, self.Wd_hh)
+                                             + T.dot(hs_t, self.Wd_s_q)
                                              + self.bd_hh )
             output = (hd_t,)
         return output
     ####
-         
+
 class SessionEncoderDecoder(Model):
     def indices_to_words(self, seq, exclude_start_end=False):
         """
@@ -535,7 +410,7 @@ class SessionEncoderDecoder(Model):
                 if word_index == self.eos_sym:
                     break
                 if not exclude_start_end or (word_index != self.eoq_sym and word_index != self.soq_sym):
-                    yield self.idx_to_str[word_index] 
+                    yield self.idx_to_str[word_index]
         return list(convert())
 
     def words_to_indices(self, seq):
@@ -548,25 +423,22 @@ class SessionEncoderDecoder(Model):
 
     def compute_updates(self, training_cost, params):
         updates = []
-         
         grads = T.grad(training_cost, params)
         grads = OrderedDict(zip(params, grads))
-        
         # Clip stuff
         c = numpy.float32(self.cutoff)
         clip_grads = []
-        
+
         norm_gs = T.sqrt(sum(T.sum(g ** 2) for p, g in grads.items()))
         normalization = T.switch(T.ge(norm_gs, c), c / norm_gs, np.float32(1.))
         notfinite = T.or_(T.isnan(norm_gs), T.isinf(norm_gs))
-         
         for p, g in grads.items():
             clip_grads.append((p, T.switch(notfinite, numpy.float32(.1) * p, g * normalization)))
-        
+
         grads = OrderedDict(clip_grads)
 
         if self.updater == 'adagrad':
-            updates = Adagrad(grads, self.lr)  
+            updates = Adagrad(grads, self.lr)
         elif self.updater == 'sgd':
             raise Exception("Sgd not implemented!")
         elif self.updater == 'adadelta':
@@ -576,37 +448,26 @@ class SessionEncoderDecoder(Model):
         elif self.updater == 'adam':
             updates = Adam(grads)
         else:
-            raise Exception("Updater not understood!") 
+            raise Exception("Updater not understood!")
         return updates
-  
+
     def build_train_function(self):
         if not hasattr(self, 'train_fn'):
             # Compile functions
             logger.debug("Building train function")
-            self.updates = self.compute_updates(self.training_cost / training_x.shape[1], self.params)
-            self.train_fn = theano.function(inputs=[self.x_data, self.x_ranks, self.x_max_length, self.x_cost_mask],
-                                            outputs=self.training_cost,
-                                            updates=self.updates, name="train_fn")
+            self.train_fn = theano.function(
+                inputs=[self.x_data, self.x_ranks, self.x_max_length, self.x_cost_mask],
+                outputs=self.training_cost, updates=self.updates, name="train_fn")
         return self.train_fn
-
-    def build_nce_function(self):
-        if not hasattr(self, 'train_fn'):
-            # Compile functions
-            logger.debug("Building train function")
-            self.updates = self.compute_updates(self.contrastive_cost / training_x.shape[1], self.params)
-            self.nce_fn = theano.function(inputs=[self.x_data, self.x_ranks, self.y_neg, self.x_max_length, self.x_cost_mask],
-                                            outputs=self.contrastive_cost,
-                                            updates=self.updates, name="train_fn")
-        return self.nce_fn
 
     def build_eval_function(self):
         if not hasattr(self, 'eval_fn'):
             # Compile functions
             logger.debug("Building evaluation function")
             self.eval_fn = theano.function(inputs=[self.x_data, self.x_ranks, self.x_max_length, self.x_cost_mask],
-                                            outputs=self.softmax_cost, name="eval_fn")
+                                           outputs=self.training_cost, name="eval_fn")
         return self.eval_fn
-   
+
     def build_score_function(self):
         if not hasattr(self, 'score_fn'):
             self.score_fn = theano.function(
@@ -634,17 +495,12 @@ class SessionEncoderDecoder(Model):
                                             outputs=outputs, name="get_states_fn")
         return self.get_states_fn
 
-    def build_sampling_function(self):
-        if not hasattr(self, 'sample_fn'):
-            logger.debug("Building sampling function")
-            self.sample_fn = theano.function(inputs=[self.n_samples, self.n_steps], outputs=[self.sample, self.sample_log_prob], \
-                                       updates=self.sampling_updates, name="sample_fn")
-        return self.sample_fn
-
     def build_next_probs_function(self):
         if not hasattr(self, 'next_probs_fn'):
-            outputs, hd = self.decoder.build_next_probs_predictor(self.beam_hs, self.beam_source, prev_hd=self.beam_hd)
-            self.next_probs_fn = theano.function(inputs=[self.beam_hs, self.beam_source, self.beam_hd],
+            outputs, hd = self.decoder.build_next_probs_predictor(
+                self.beam_hs, self.beam_source, prev_hd=self.beam_hd)
+            self.next_probs_fn = theano.function(
+                inputs=[self.beam_hs, self.beam_source, self.beam_hd],
                 outputs=[outputs, hd],
                 name="next_probs_fn")
         return self.next_probs_fn
@@ -652,7 +508,7 @@ class SessionEncoderDecoder(Model):
     def build_first_vector(self):
         if not hasattr(self, 'first_vec_fn'):
             (h, hr), hs, _ = self.encoder.build_encoder(self.aug_x_data)
-            hd0 = self.decoder.query_rec_activation(T.dot(hs, self.decoder.Wd_s_0) + self.decoder.bd_s_0) 
+            hd0 = self.decoder.query_rec_activation(T.dot(hs, self.decoder.Wd_s_0) + self.decoder.bd_s_0)
             self.first_vec_fn = theano.function(inputs=[self.x_data],
                 outputs=[h, hs, hd0], name="first_vec_fn")
         return self.first_vec_fn
@@ -665,12 +521,12 @@ class SessionEncoderDecoder(Model):
         return self.encoder_fn
 
     def __init__(self, state):
-        Model.__init__(self)    
+        Model.__init__(self)
         self.state = state
 
         # Compatibility towards older models
         self.__dict__.update(state)
-        self.rng = numpy.random.RandomState(state['seed']) 
+        self.rng = numpy.random.RandomState(state['seed'])
 
         # Load dictionary
         raw_dict = cPickle.load(open(self.dictionary, 'r'))
@@ -713,13 +569,10 @@ class SessionEncoderDecoder(Model):
         # The training is done with a trick. We append a special </q> at the beginning of the dialog
         # so that we can predict also the first sent in the dialog starting from the dialog beginning token (</q>).
         self.aug_x_data = T.concatenate([T.alloc(np.int32(self.eoq_sym), 1, self.x_data.shape[1]), self.x_data])
-         
         training_x = self.aug_x_data[:self.x_max_length]
         training_y = self.aug_x_data[1:self.x_max_length+1]
-         
         training_ranks = self.x_ranks[:self.x_max_length-1].flatten()
         training_ranks_mask = T.neq(training_ranks, 0).flatten()
-        
         # Here we find the end-of-sentence tokens in the minibatch.
         training_hs_mask = T.neq(training_x, self.eoq_sym)
         training_x_cost_mask = self.x_cost_mask[:self.x_max_length].flatten()
@@ -729,32 +582,21 @@ class SessionEncoderDecoder(Model):
             logger.debug("Decoder bias type {}".format(self.decoder_bias_type))
 
         logger.info("Build encoder")
-        (self.h, _), self.hs, (self.rs, self.us) = self.encoder.build_encoder(training_x, xmask=training_hs_mask)
-         
-        logger.info("Build decoder (NCE)")
-        contrastive_cost, self.hd_nce = self.decoder.build_decoder(self.hs, training_x, y_neg=self.y_neg, y=training_y, xmask=training_hs_mask, mode=Decoder.NCE)
+        (self.h, _), self.hs, (self.rs, self.us) = \
+          self.encoder.build_encoder(training_x, xmask=training_hs_mask)
 
         logger.info("Build decoder (EVAL)")
-        target_probs, self.hd, self.decoder_states = self.decoder.build_decoder(self.hs, training_x, xmask=training_hs_mask, \
+        target_probs, self.hd, self.decoder_states = \
+            self.decoder.build_decoder(self.hs, training_x, xmask=training_hs_mask, \
                                                                                 y=training_y, mode=Decoder.EVALUATION)
-         
         logger.info("Build rank predictor")
         self.predicted_ranks = self.decoder.build_rank_layer(self.hs)
 
         # Prediction cost and rank cost
-        self.per_example_cost = -T.log(target_probs).reshape((self.x_max_length, self.x_data.shape[1]))
+        self.per_example_cost = -T.log2(target_probs).reshape((self.x_max_length, self.x_data.shape[1]))
         self.rank_cost = T.sum(((self.predicted_ranks[1:].flatten() - training_ranks) ** 2) * (training_ranks_mask)) / T.sum(training_ranks_mask)
-        self.contrastive_cost = T.sum(contrastive_cost.flatten() * training_x_cost_mask) + np.float32(self.lambda_rank) * self.rank_cost  
-        self.softmax_cost = T.sum(-T.log(target_probs) * training_x_cost_mask) + np.float32(self.lambda_rank) * self.rank_cost 
-         
-        self.training_cost = self.softmax_cost
-        if self.use_nce:
-            self.training_cost = self.contrastive_cost
-        
-        # Sampling variables
-        self.n_samples = T.iscalar("n_samples")
-        self.n_steps = T.iscalar("n_steps")
-        (self.sample, self.sample_log_prob), self.sampling_updates = self.decoder.build_sampler(self.n_samples, self.n_steps) 
+        self.training_cost = T.sum(-T.log2(target_probs) * training_x_cost_mask) + np.float32(self.lambda_rank) * self.rank_cost
+        self.updates = self.compute_updates(self.training_cost / training_x.shape[1], self.params)
 
         # Beam-search variables
         self.beam_source = T.lvector("beam_source")
