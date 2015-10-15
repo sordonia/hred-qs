@@ -13,7 +13,7 @@ import codecs
 import search
 import utils
 
-from session_encdec import SessionEncoderDecoder 
+from session_encdec import SessionEncoderDecoder
 from numpy_compat import argpartition
 from state import prototype_state
 
@@ -53,8 +53,6 @@ def parse_args():
     parser.add_argument("--verbose",
             action="store_true", default=False,
             help="Be verbose")
-
-    parser.add_argument("changes", nargs="?", default="", help="Changes to state")
     return parser.parse_args()
 
 def main():
@@ -67,33 +65,29 @@ def main():
     with open(state_path) as src:
         state.update(cPickle.load(src))
 
-    logging.basicConfig(level=getattr(logging, state['level']), format="%(asctime)s: %(name)s: %(levelname)s: %(message)s")
+    logging.basicConfig(
+        level  = getattr(logging, state['level']),
+        format = "%(asctime)s: %(name)s: %(levelname)s: %(message)s")
 
-    model = SessionEncoderDecoder(state) 
-    sampler = search.Sampler(model)
+    model = SessionEncoderDecoder(state)
+    sampler = search.BeamSampler(model)
 
     if os.path.isfile(model_path):
         logger.debug("Loading previous model")
         model.load(model_path)
     else:
         raise Exception("Must specify a valid model path")
-
     contexts = [[]]
     lines = open(args.context, "r").readlines()
     contexts = [x.strip().split('\t') for x in lines]
-
-    context_samples, \
-    context_costs, \
-    context_ranks = sampler.sample(contexts,
-                         n_samples=args.n_samples,
-                         ignore_unk=args.ignore_unk,
-                         verbose=args.verbose)
-     
+    context_samples, context_costs = sampler.sample(
+        contexts, n_samples=args.n_samples, ignore_unk=args.ignore_unk,
+        verbose=args.verbose)
     # Write to output file
     output_handle = open(args.context + "_HED_" + model.run_id + ".gen", "w")
     for context_sample in context_samples:
         print >> output_handle, '\t'.join(context_sample)
     output_handle.close()
-    
+
 if __name__ == "__main__":
     main()
