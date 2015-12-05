@@ -4,7 +4,6 @@ from data_iterator import *
 from state import *
 from session_encdec import *
 from utils import *
-from evaluation import *
 
 import time
 import traceback
