@@ -22,7 +22,6 @@ class IterativeScorer(object):
         self.unk_sym = self.model.unk_sym
         self.eoq_sym = self.model.eoq_sym
         self.eos_sym = self.model.eos_sym
-        self.soq_sym = self.model.soq_sym
         self.qdim = self.model.qdim
         self.sdim = self.model.sdim
         self.compiled = False
@@ -77,8 +76,6 @@ class Scorer(object):
 
         def _convert_sentence(sentence):
             sentence_ids = self.model.words_to_indices(sentence.split())
-            if self.model.soq_sym != -1:
-                sentence_ids = [self.model.soq_sym] + sentence_ids
             sentence_ids += [self.model.eoq_sym]
             return sentence_ids
 
